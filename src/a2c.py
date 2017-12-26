@@ -1,31 +1,102 @@
-import os.path as osp
-import gym
 import time
 import joblib
-import logging
 import numpy as np
 import tensorflow as tf
 
-from src.utils import set_global_seeds, explained_variance
-from src.subproc_vec_env import SubprocVecEnv
-from src.atari_wrappers import wrap_deepmind
 
-from src.utils import discount_with_dones
-from src.utils import Scheduler, make_path, find_trainable_variables
-from src.utils import cat_entropy, mse
+def set_global_seeds(i):
+    try:
+        import tensorflow as tf
+    except ImportError:
+        pass
+    else:
+        tf.set_random_seed(i)
+    np.random.seed(i)
+
+
+def explained_variance(ypred, y):
+    """
+    Computes fraction of variance that ypred explains about y.
+    Returns 1 - Var[y-ypred] / Var[y]
+    interpretation:
+        ev=0  =>  might as well have predicted zero
+        ev=1  =>  perfect prediction
+        ev<0  =>  worse than just predicting zero
+    """
+    assert y.ndim == 1 and ypred.ndim == 1
+    vary = np.var(y)
+    return np.nan if vary == 0 else 1 - np.var(y - ypred) / vary
+
+
+def cat_entropy(logits):
+    a0 = logits - tf.reduce_max(logits, 1, keep_dims=True)
+    ea0 = tf.exp(a0)
+    z0 = tf.reduce_sum(ea0, 1, keep_dims=True)
+    p0 = ea0 / z0
+    return tf.reduce_sum(p0 * (tf.log(z0) - a0), 1)
+
+
+def mse(pred, target):
+    return tf.square(pred - target) / 2.
+
+
+def find_trainable_variables(key):
+    with tf.variable_scope(key):
+        return tf.trainable_variables()
+
+
+def constant(p):
+    return 1
+
+
+def linear(p):
+    return 1 - p
+
+
+schedules = {
+    'linear': linear,
+    'constant': constant
+}
+
+
+class Scheduler(object):
+
+    def __init__(self, v, nvalues, schedule):
+        self.n = 0.
+        self.v = v
+        self.nvalues = nvalues
+        self.schedule = schedules[schedule]
+
+    def value(self):
+        current_value = self.v * self.schedule(self.n / self.nvalues)
+        self.n += 1.
+        return current_value
+
+    def value_steps(self, steps):
+        return self.v * self.schedule(steps / self.nvalues)
+
+
+def discount_with_dones(rewards, dones, gamma):
+    discounted = []
+    r = 0
+    for reward, done in zip(rewards[::-1], dones[::-1]):
+        r = reward + gamma * r * (1. - done)  # fixed off by one bug
+        discounted.append(r)
+    return discounted[::-1]
+
 
 class Model():
 
     def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack, num_procs,
-            ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
-            alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
+                 ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
+                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
         config = tf.ConfigProto(allow_soft_placement=True,
                                 intra_op_parallelism_threads=num_procs,
                                 inter_op_parallelism_threads=num_procs)
         config.gpu_options.allow_growth = True
         sess = tf.Session(config=config)
         nact = ac_space.n
-        nbatch = nenvs*nsteps
+        nbatch = nenvs * nsteps
 
         A = tf.placeholder(tf.int32, [nbatch])
         ADV = tf.placeholder(tf.float32, [nbatch])
@@ -39,7 +110,7 @@ class Model():
         pg_loss = tf.reduce_mean(ADV * neglogpac)
         vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vf), R))
         entropy = tf.reduce_mean(cat_entropy(train_model.pi))
-        loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
+        loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
 
         params = find_trainable_variables("model")
         grads = tf.gradients(loss, params)
@@ -55,7 +126,7 @@ class Model():
             advs = rewards - values
             for step in range(len(obs)):
                 cur_lr = lr.value()
-            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr}
+            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: cur_lr}
             if states != []:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
@@ -67,7 +138,7 @@ class Model():
 
         def save(save_path):
             ps = sess.run(params)
-            make_path(save_path)
+            # TODO: check for save path
             joblib.dump(ps, save_path)
 
         def load(load_path):
@@ -87,6 +158,7 @@ class Model():
         self.load = load
         tf.global_variables_initializer().run(session=sess)
 
+
 class Runner():
 
     def __init__(self, env, model, nsteps=5, nstack=4, gamma=0.99):
@@ -94,8 +166,8 @@ class Runner():
         self.model = model
         nh, nw, nc = env.observation_space.shape
         nenv = env.num_envs
-        self.batch_ob_shape = (nenv*nsteps, nh, nw, nc*nstack)
-        self.obs = np.zeros((nenv, nh, nw, nc*nstack), dtype=np.uint8)
+        self.batch_ob_shape = (nenv * nsteps, nh, nw, nc * nstack)
+        self.obs = np.zeros((nenv, nh, nw, nc * nstack), dtype=np.uint8)
         self.nc = nc
         obs = env.reset()
         self.update_obs(obs)
@@ -111,7 +183,7 @@ class Runner():
         self.obs[:, :, :, -self.nc:] = obs
 
     def run(self):
-        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones = [],[],[],[],[]
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones = [], [], [], [], []
         mb_states = self.states
         for n in range(self.nsteps):
             actions, values, states = self.model.step(self.obs, self.states, self.dones)
@@ -124,11 +196,11 @@ class Runner():
             self.dones = dones
             for n, done in enumerate(dones):
                 if done:
-                    self.obs[n] = self.obs[n]*0
+                    self.obs[n] = self.obs[n] * 0
             self.update_obs(obs)
             mb_rewards.append(rewards)
         mb_dones.append(self.dones)
-        #batch of steps to batch of rollouts
+        # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
         mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
@@ -137,12 +209,12 @@ class Runner():
         mb_masks = mb_dones[:, :-1]
         mb_dones = mb_dones[:, 1:]
         last_values = self.model.value(self.obs, self.states, self.dones).tolist()
-        #discount/bootstrap off value fn
+        # discount/bootstrap off value fn
         for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_values)):
             rewards = rewards.tolist()
             dones = dones.tolist()
             if dones[-1] == 0:
-                rewards = discount_with_dones(rewards+[value], dones+[0], self.gamma)[:-1]
+                rewards = discount_with_dones(rewards + [value], dones + [0], self.gamma)[:-1]
             else:
                 rewards = discount_with_dones(rewards, dones, self.gamma)
             mb_rewards[n] = rewards
@@ -152,39 +224,47 @@ class Runner():
         mb_masks = mb_masks.flatten()
         return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values
 
-def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6), vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4, lrschedule='linear', epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
+
+def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6),
+          vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
+          lrschedule='linear', epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
-    num_procs = len(env.remotes) # HACK
-    model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps, nstack=nstack, num_procs=num_procs, ent_coef=ent_coef, vf_coef=vf_coef,
-        max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
+    num_procs = len(env.remotes)  # HACK
+    model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
+                  nsteps=nsteps, nstack=nstack, num_procs=num_procs,
+                  ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
+                  lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps,
+                  lrschedule=lrschedule)
     runner = Runner(env, model, nsteps=nsteps, nstack=nstack, gamma=gamma)
 
-    nbatch = nenvs*nsteps
+    nbatch = nenvs * nsteps
     tstart = time.time()
-    for update in range(1, total_timesteps//nbatch+1):
+    for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values = runner.run()
-        policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
-        nseconds = time.time()-tstart
-        fps = int((update*nbatch)/nseconds)
+        policy_loss, value_loss, policy_entropy = model.train(
+            obs, states, rewards, masks, actions, values)
+        nseconds = time.time() - tstart
+        fps = int((update * nbatch) / nseconds)
         if update % log_interval == 0 or update == 1:
             ev = explained_variance(values, rewards)
-            
+
             # TODO: Use logs
             print(' - - - - - - - ')
             print("nupdates", update)
-            print("total_timesteps", update*nbatch)
+            print("total_timesteps", update * nbatch)
             print("fps", fps)
             print("policy_entropy", float(policy_entropy))
             print("value_loss", float(value_loss))
             print("explained_variance", float(ev))
             print(' - - - - - - - ')
-            
+
     env.close()
+
 
 if __name__ == '__main__':
     main()
