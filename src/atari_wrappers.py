@@ -13,8 +13,7 @@ class NoopResetEnv(gym.Wrapper):
         self.noop_max = noop_max
         self.override_num_noops = None
         self.noop_action = 0
-        print('WARNING: NoopResetEnv NO ASSERT')
-        #assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
+        assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
 
     def _reset(self, **kwargs):
         """ Do no-op action for a number of steps in [1, noop_max]."""
@@ -183,8 +182,7 @@ class LazyFrames():
 
 def make_atari(env_id):
     env = gym.make(env_id)
-    print('WARNING: make_atari does not check for frame skip')
-    #assert 'NoFrameskip' in env.spec.id
+    assert 'NoFrameskip' in env.spec.id
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     return env
@@ -195,10 +193,9 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False, 
     if episode_life:
         env = EpisodicLifeEnv(env)
 
-    print('WARNING: warp_deepmind does not check for fire reset.')
-    # if 'FIRE' in env.unwrapped.get_action_meanings():
-    #     env = FireResetEnv(env)
-    #env = WarpFrame(env)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = WarpFrame(env)
     if scale:
         env = ScaledFloatFrame(env)
     if clip_rewards:
