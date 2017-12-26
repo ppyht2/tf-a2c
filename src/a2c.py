@@ -5,12 +5,7 @@ import tensorflow as tf
 
 
 def set_global_seeds(i):
-    try:
-        import tensorflow as tf
-    except ImportError:
-        pass
-    else:
-        tf.set_random_seed(i)
+    tf.set_random_seed(i)
     np.random.seed(i)
 
 
@@ -36,10 +31,6 @@ def cat_entropy(logits):
     return tf.reduce_sum(p0 * (tf.log(z0) - a0), 1)
 
 
-def mse(pred, target):
-    return tf.square(pred - target) / 2.
-
-
 def find_trainable_variables(key):
     with tf.variable_scope(key):
         return tf.trainable_variables()
@@ -59,7 +50,7 @@ schedules = {
 }
 
 
-class Scheduler(object):
+class Scheduler():
 
     def __init__(self, v, nvalues, schedule):
         self.n = 0.
@@ -95,7 +86,6 @@ class Model():
                                 inter_op_parallelism_threads=num_procs)
         config.gpu_options.allow_growth = True
         sess = tf.Session(config=config)
-        nact = ac_space.n
         nbatch = nenvs * nsteps
 
         A = tf.placeholder(tf.int32, [nbatch])
@@ -108,7 +98,7 @@ class Model():
 
         neglogpac = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=train_model.pi, labels=A)
         pg_loss = tf.reduce_mean(ADV * neglogpac)
-        vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vf), R))
+        vf_loss = tf.reduce_mean(tf.squared_difference(tf.squeeze(train_model.vf), R) / 2.0)
         entropy = tf.reduce_mean(cat_entropy(train_model.pi))
         loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
 
@@ -264,7 +254,3 @@ def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6),
             print(' - - - - - - - ')
 
     env.close()
-
-
-if __name__ == '__main__':
-    main()
