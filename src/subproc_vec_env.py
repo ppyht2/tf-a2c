@@ -1,26 +1,6 @@
 import numpy as np
 from multiprocessing import Process, Pipe
 
-class VecEnv():
-    """
-    Vectorized environment base class
-    """
-    def step(self, vac):
-        """
-        Apply sequence of actions to sequence of environments
-        actions -> (observations, rewards, news)
-
-        where 'news' is a boolean vector indicating whether each element is new.
-        """
-        raise NotImplementedError
-    def reset(self):
-        """
-        Reset all environments
-        """
-        raise NotImplementedError
-    def close(self):
-        pass
-
 
 def worker(remote, parent_remote, env_fn_wrapper):
     parent_remote.close()
@@ -51,17 +31,20 @@ class CloudpickleWrapper():
     """
     Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
     """
+
     def __init__(self, x):
         self.x = x
+
     def __getstate__(self):
         import cloudpickle
         return cloudpickle.dumps(self.x)
+
     def __setstate__(self, ob):
         import pickle
         self.x = pickle.loads(ob)
 
 
-class SubprocVecEnv(VecEnv):
+class SubprocVecEnv():
     def __init__(self, env_fns):
         """
         envs: list of gym environments to run in subprocesses
@@ -70,16 +53,15 @@ class SubprocVecEnv(VecEnv):
         nenvs = len(env_fns)
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
         self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
-            for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
+                   for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
         for p in self.ps:
-            p.daemon = True # if the main process crashes, we should not cause things to hang
+            p.daemon = True  # if the main process crashes, we should not cause things to hang
             p.start()
         for remote in self.work_remotes:
             remote.close()
 
         self.remotes[0].send(('get_spaces', None))
         self.action_space, self.observation_space = self.remotes[0].recv()
-
 
     def step(self, actions):
         for remote, action in zip(self.remotes, actions):
