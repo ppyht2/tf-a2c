@@ -10,6 +10,7 @@ import gym
 import argparse
 import logging
 
+
 def get_args():
     # Get some basic command line arguements
     parser = argparse.ArgumentParser()
@@ -20,8 +21,7 @@ def get_args():
     return parser.parse_args()
 
 
-
-def train(env_id, num_timesteps, num_cpu, seed = 0):
+def train(env_id, num_timesteps, num_cpu, seed=0):
     def make_env(rank):
         def _thunk():
             env = make_atari(env_id)
@@ -31,11 +31,11 @@ def train(env_id, num_timesteps, num_cpu, seed = 0):
             return wrap_deepmind(env)
         return _thunk
 
-    # TODO: set global seeds
     env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
-    learn(CnnPolicy, env, seed, total_timesteps = int(num_timesteps*1.1))
+    learn(CnnPolicy, env, seed, total_timesteps=int(num_timesteps * 1.1))
     env.close()
     pass
+
 
 def main():
     args = get_args()
@@ -43,6 +43,7 @@ def main():
     if not os.path.exists('models'):
         os.mkdir('models')
     train(args.env, args.steps, num_cpu=args.nenv)
+
 
 if __name__ == "__main__":
     main()
