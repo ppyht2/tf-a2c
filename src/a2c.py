@@ -2,6 +2,7 @@ import time
 import joblib
 import numpy as np
 import tensorflow as tf
+import os
 
 
 def set_global_seeds(i):
@@ -128,7 +129,6 @@ class Model():
 
         def save(save_path):
             ps = sess.run(params)
-            # TODO: check for save path
             joblib.dump(ps, save_path)
 
         def load(load_path):
@@ -215,7 +215,7 @@ class Runner():
         return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values
 
 
-def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6),
+def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
           vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
           lrschedule='linear', epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
     tf.reset_default_graph()
@@ -225,6 +225,7 @@ def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6),
     ob_space = env.observation_space
     ac_space = env.action_space
     num_procs = len(env.remotes)  # HACK
+    # Load model
     model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
                   nsteps=nsteps, nstack=nstack, num_procs=num_procs,
                   ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
@@ -254,3 +255,5 @@ def learn(policy, env, seed, nsteps=5, nstack=4, total_timesteps=int(80e6),
             print(' - - - - - - - ')
 
     env.close()
+    save_name = os.path.join('models', env_id + '.save')
+    model.save(save_name)

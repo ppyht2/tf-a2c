@@ -167,13 +167,6 @@ class FrameStack(gym.Wrapper):
         return LazyFrames(list(self.frames))
 
 
-class ScaledFloatFrame(gym.ObservationWrapper):
-    def _observation(self, observation):
-        # careful! This undoes the memory optimization, use
-        # with smaller replay buffers only.
-        return np.array(observation).astype(np.float32) / 255.0
-
-
 class LazyFrames():
     def __init__(self, frames):
         """This object ensures that common frames between the observations are only stored once.
@@ -200,7 +193,7 @@ def make_atari(env_id):
     return env
 
 
-def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
+def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False):
     """Configure environment for DeepMind-style Atari.
     """
     if episode_life:
@@ -209,10 +202,11 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False, 
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
     env = WarpFrame(env)
-    if scale:
-        env = ScaledFloatFrame(env)
+
     if clip_rewards:
         env = ClipRewardEnv(env)
+
     if frame_stack:
         env = FrameStack(env, 4)
+
     return env
