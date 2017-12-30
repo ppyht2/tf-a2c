@@ -48,12 +48,11 @@ def explained_variance(ypred, y):
 
 class Model():
 
-    def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack, num_procs,
+    def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack,
                  ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
                  alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6)):
-        config = tf.ConfigProto(allow_soft_placement=True,
-                                intra_op_parallelism_threads=num_procs,
-                                inter_op_parallelism_threads=num_procs)
+        config = tf.ConfigProto(intra_op_parallelism_threads=nenvs,
+                                inter_op_parallelism_threads=nenvs)
         config.gpu_options.allow_growth = True
         sess = tf.Session(config=config)
         nbatch = nenvs * nsteps
@@ -132,8 +131,7 @@ class Runner():
         self.dones = [False for _ in range(nenv)]
 
     def update_obs(self, obs):
-        # Do frame-stacking here instead of the FrameStack wrapper to reduce
-        # IPC overhead
+        # Do frame-stacking here instead of the FrameStack wrapper to reduce IPC overhead
         self.obs = np.roll(self.obs, shift=-self.nc, axis=3)
         self.obs[:, :, :, -self.nc:] = obs
 
@@ -180,20 +178,20 @@ class Runner():
         return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values
 
 
-def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
+def learn(policy, env, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
           vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
           epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
     nenvs = env.num_envs
+    env_id = env.env_id
     ob_space = env.observation_space
     ac_space = env.action_space
-    num_procs = len(env.remotes)  # HACK
-    # Load model
     model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
-                  nsteps=nsteps, nstack=nstack, num_procs=num_procs,
-                  ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
+                  nsteps=nsteps, nstack=nstack,
+                  ent_coef=ent_coef, vf_coef=vf_coef,
+                  max_grad_norm=max_grad_norm,
                   lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps)
 
     runner = Runner(env, model, nsteps=nsteps, nstack=nstack, gamma=gamma)
