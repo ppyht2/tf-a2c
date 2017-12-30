@@ -10,20 +10,6 @@ def set_global_seeds(i):
     np.random.seed(i)
 
 
-def explained_variance(ypred, y):
-    """
-    Computes fraction of variance that ypred explains about y.
-    Returns 1 - Var[y-ypred] / Var[y]
-    interpretation:
-        ev=0  =>  might as well have predicted zero
-        ev=1  =>  perfect prediction
-        ev<0  =>  worse than just predicting zero
-    """
-    assert y.ndim == 1 and ypred.ndim == 1
-    vary = np.var(y)
-    return np.nan if vary == 0 else 1 - np.var(y - ypred) / vary
-
-
 def cat_entropy(logits):
     a0 = logits - tf.reduce_max(logits, 1, keep_dims=True)
     ea0 = tf.exp(a0)
@@ -75,6 +61,20 @@ def discount_with_dones(rewards, dones, gamma):
         r = reward + gamma * r * (1. - done)  # fixed off by one bug
         discounted.append(r)
     return discounted[::-1]
+
+
+def explained_variance(ypred, y):
+    """
+    Computes fraction of variance that ypred explains about y.
+    Returns 1 - Var[y-ypred] / Var[y]
+    interpretation:
+        ev=0  =>  might as well have predicted zero
+        ev=1  =>  perfect prediction
+        ev<0  =>  worse than just predicting zero
+    """
+    assert y.ndim == 1 and ypred.ndim == 1
+    vary = np.var(y)
+    return np.nan if vary == 0 else 1 - np.var(y - ypred) / vary
 
 
 class Model():
@@ -252,7 +252,6 @@ def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, tota
             print("policy_entropy", float(policy_entropy))
             print("value_loss", float(value_loss))
             print("explained_variance", float(ev))
-            print(' - - - - - - - ')
 
     env.close()
     save_name = os.path.join('models', env_id + '.save')

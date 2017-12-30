@@ -1,7 +1,7 @@
 from src.subproc_vec_env import SubprocVecEnv
 from src.atari_wrappers import make_atari, wrap_deepmind
 
-from src.policy import CnnPolicy
+from src.policy import Policy
 from src.a2c import learn
 
 import os
@@ -34,7 +34,7 @@ def train(env_id, num_timesteps, num_cpu, seed=0):
         return _thunk
 
     env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
-    learn(CnnPolicy, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1))
+    learn(Policy, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1))
     env.close()
     pass
 
