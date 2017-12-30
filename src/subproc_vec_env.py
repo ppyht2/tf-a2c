@@ -23,6 +23,8 @@ def worker(remote, parent_remote, env_fn_wrapper):
             break
         elif cmd == 'get_spaces':
             remote.send((env.action_space, env.observation_space))
+        elif cmd == 'get_id':
+            remote.send(env.spec.id)
         else:
             raise NotImplementedError
 
@@ -62,6 +64,9 @@ class SubprocVecEnv():
 
         self.remotes[0].send(('get_spaces', None))
         self.action_space, self.observation_space = self.remotes[0].recv()
+
+        self.remotes[0].send(('get_id', None))
+        self.env_id = self.remotes[0].recv()
 
     def step(self, actions):
         for remote, action in zip(self.remotes, actions):

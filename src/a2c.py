@@ -10,6 +10,28 @@ def set_global_seeds(i):
     np.random.seed(i)
 
 
+def cat_entropy(logits):
+    a0 = logits - tf.reduce_max(logits, 1, keep_dims=True)
+    ea0 = tf.exp(a0)
+    z0 = tf.reduce_sum(ea0, 1, keep_dims=True)
+    p0 = ea0 / z0
+    return tf.reduce_sum(p0 * (tf.log(z0) - a0), 1)
+
+
+def find_trainable_variables(key):
+    with tf.variable_scope(key):
+        return tf.trainable_variables()
+
+
+def discount_with_dones(rewards, dones, gamma):
+    discounted = []
+    r = 0
+    for reward, done in zip(rewards[::-1], dones[::-1]):
+        r = reward + gamma * r * (1. - done)  # fixed off by one bug
+        discounted.append(r)
+    return discounted[::-1]
+
+
 def explained_variance(ypred, y):
     """
     Computes fraction of variance that ypred explains about y.
@@ -24,67 +46,13 @@ def explained_variance(ypred, y):
     return np.nan if vary == 0 else 1 - np.var(y - ypred) / vary
 
 
-def cat_entropy(logits):
-    a0 = logits - tf.reduce_max(logits, 1, keep_dims=True)
-    ea0 = tf.exp(a0)
-    z0 = tf.reduce_sum(ea0, 1, keep_dims=True)
-    p0 = ea0 / z0
-    return tf.reduce_sum(p0 * (tf.log(z0) - a0), 1)
-
-
-def find_trainable_variables(key):
-    with tf.variable_scope(key):
-        return tf.trainable_variables()
-
-
-def constant(p):
-    return 1
-
-
-def linear(p):
-    return 1 - p
-
-
-schedules = {
-    'linear': linear,
-    'constant': constant
-}
-
-
-class Scheduler():
-
-    def __init__(self, v, nvalues, schedule):
-        self.n = 0.
-        self.v = v
-        self.nvalues = nvalues
-        self.schedule = schedules[schedule]
-
-    def value(self):
-        current_value = self.v * self.schedule(self.n / self.nvalues)
-        self.n += 1.
-        return current_value
-
-    def value_steps(self, steps):
-        return self.v * self.schedule(steps / self.nvalues)
-
-
-def discount_with_dones(rewards, dones, gamma):
-    discounted = []
-    r = 0
-    for reward, done in zip(rewards[::-1], dones[::-1]):
-        r = reward + gamma * r * (1. - done)  # fixed off by one bug
-        discounted.append(r)
-    return discounted[::-1]
-
-
 class Model():
 
-    def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack, num_procs,
+    def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack,
                  ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
-                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
-        config = tf.ConfigProto(allow_soft_placement=True,
-                                intra_op_parallelism_threads=num_procs,
-                                inter_op_parallelism_threads=num_procs)
+                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6)):
+        config = tf.ConfigProto(intra_op_parallelism_threads=nenvs,
+                                inter_op_parallelism_threads=nenvs)
         config.gpu_options.allow_growth = True
         sess = tf.Session(config=config)
         nbatch = nenvs * nsteps
@@ -111,13 +79,9 @@ class Model():
         trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
         _train = trainer.apply_gradients(grads)
 
-        lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-
         def train(obs, states, rewards, masks, actions, values):
             advs = rewards - values
-            for step in range(len(obs)):
-                cur_lr = lr.value()
-            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: cur_lr}
+            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: lr}
             if states != []:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
@@ -167,8 +131,7 @@ class Runner():
         self.dones = [False for _ in range(nenv)]
 
     def update_obs(self, obs):
-        # Do frame-stacking here instead of the FrameStack wrapper to reduce
-        # IPC overhead
+        # Do frame-stacking here instead of the FrameStack wrapper to reduce IPC overhead
         self.obs = np.roll(self.obs, shift=-self.nc, axis=3)
         self.obs[:, :, :, -self.nc:] = obs
 
@@ -215,22 +178,22 @@ class Runner():
         return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values
 
 
-def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
+def learn(policy, env, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
           vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
-          lrschedule='linear', epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
+          epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
     nenvs = env.num_envs
+    env_id = env.env_id
     ob_space = env.observation_space
     ac_space = env.action_space
-    num_procs = len(env.remotes)  # HACK
-    # Load model
     model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
-                  nsteps=nsteps, nstack=nstack, num_procs=num_procs,
-                  ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
-                  lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps,
-                  lrschedule=lrschedule)
+                  nsteps=nsteps, nstack=nstack,
+                  ent_coef=ent_coef, vf_coef=vf_coef,
+                  max_grad_norm=max_grad_norm,
+                  lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps)
+
     runner = Runner(env, model, nsteps=nsteps, nstack=nstack, gamma=gamma)
 
     nbatch = nenvs * nsteps
@@ -252,7 +215,6 @@ def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, tota
             print("policy_entropy", float(policy_entropy))
             print("value_loss", float(value_loss))
             print("explained_variance", float(ev))
-            print(' - - - - - - - ')
 
     env.close()
     save_name = os.path.join('models', env_id + '.save')
