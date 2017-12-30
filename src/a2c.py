@@ -23,37 +23,6 @@ def find_trainable_variables(key):
         return tf.trainable_variables()
 
 
-def constant(p):
-    return 1
-
-
-def linear(p):
-    return 1 - p
-
-
-schedules = {
-    'linear': linear,
-    'constant': constant
-}
-
-
-class Scheduler():
-
-    def __init__(self, v, nvalues, schedule):
-        self.n = 0.
-        self.v = v
-        self.nvalues = nvalues
-        self.schedule = schedules[schedule]
-
-    def value(self):
-        current_value = self.v * self.schedule(self.n / self.nvalues)
-        self.n += 1.
-        return current_value
-
-    def value_steps(self, steps):
-        return self.v * self.schedule(steps / self.nvalues)
-
-
 def discount_with_dones(rewards, dones, gamma):
     discounted = []
     r = 0
@@ -81,7 +50,7 @@ class Model():
 
     def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack, num_procs,
                  ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
-                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
+                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6)):
         config = tf.ConfigProto(allow_soft_placement=True,
                                 intra_op_parallelism_threads=num_procs,
                                 inter_op_parallelism_threads=num_procs)
@@ -111,13 +80,9 @@ class Model():
         trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
         _train = trainer.apply_gradients(grads)
 
-        lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-
         def train(obs, states, rewards, masks, actions, values):
             advs = rewards - values
-            for step in range(len(obs)):
-                cur_lr = lr.value()
-            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: cur_lr}
+            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: lr}
             if states != []:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
@@ -217,7 +182,7 @@ class Runner():
 
 def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
           vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
-          lrschedule='linear', epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
+          epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
@@ -229,8 +194,8 @@ def learn(policy, env, env_id, seed, new_session=True,  nsteps=5, nstack=4, tota
     model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
                   nsteps=nsteps, nstack=nstack, num_procs=num_procs,
                   ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
-                  lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps,
-                  lrschedule=lrschedule)
+                  lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps)
+
     runner = Runner(env, model, nsteps=nsteps, nstack=nstack, gamma=gamma)
 
     nbatch = nenvs * nsteps
