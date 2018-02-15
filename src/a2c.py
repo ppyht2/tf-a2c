@@ -180,12 +180,13 @@ class Runner():
 
 def learn(policy, env, seed, new_session=True,  nsteps=5, nstack=4, total_timesteps=int(80e6),
           vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
-          epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
+          epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=1000):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
     nenvs = env.num_envs
     env_id = env.env_id
+    save_name = os.path.join('models', env_id + '.save')
     ob_space = env.observation_space
     ac_space = env.action_space
     model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs,
@@ -193,6 +194,8 @@ def learn(policy, env, seed, new_session=True,  nsteps=5, nstack=4, total_timest
                   ent_coef=ent_coef, vf_coef=vf_coef,
                   max_grad_norm=max_grad_norm,
                   lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps)
+    if os.path.exists(save_name):
+        model.load(save_name)
 
     runner = Runner(env, model, nsteps=nsteps, nstack=nstack, gamma=gamma)
 
@@ -215,7 +218,7 @@ def learn(policy, env, seed, new_session=True,  nsteps=5, nstack=4, total_timest
             print("policy_entropy", float(policy_entropy))
             print("value_loss", float(value_loss))
             print("explained_variance", float(ev))
+            model.save(save_name)
 
     env.close()
-    save_name = os.path.join('models', env_id + '.save')
     model.save(save_name)
