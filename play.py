@@ -4,6 +4,8 @@ import numpy as np
 from src.atari_wrappers import make_atari, wrap_deepmind
 from src.a2c import Model
 from src.policy import Policy
+import imageio
+import time
 
 
 def get_args():
@@ -15,7 +17,7 @@ def get_args():
 
 def get_model(env, nsteps=5, nstack=4, total_timesteps=int(80e6),
               vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5, lr=7e-4,
-              epsilon=1e-5, alpha=0.99, gamma=0.99, log_interval=100):
+              epsilon=1e-5, alpha=0.99):
     model = Model(policy=Policy, ob_space=env.observation_space,
                   ac_space=env.action_space, nenvs=1, nsteps=nsteps, nstack=1,
                   ent_coef=ent_coef, vf_coef=vf_coef, max_grad_norm=max_grad_norm,
@@ -24,6 +26,7 @@ def get_model(env, nsteps=5, nstack=4, total_timesteps=int(80e6),
 
 
 def main():
+    os.makedirs('imgs', exist_ok=True)
     env_id = get_args().env
     env = make_atari(env_id)
     env = wrap_deepmind(env, frame_stack=True, clip_rewards=False, episode_life=True)
@@ -35,12 +38,18 @@ def main():
     model.load(save_path)
 
     obs = env.reset()
+    renders = []
     while True:
+
         obs = np.expand_dims(obs.__array__(), axis=0)
         a, v, _ = model.step(obs)
         obs, reward, done, info = env.step(a)
+        renders.append(imageio.core.util.Image(env.render('rgb_array')))
         env.render()
         if done:
+            name = 'imgs/' + str(int(time.time())) + '.gif'
+            imageio.mimsave(name, renders, duration=1 / 30)
+            renders = []
             env.reset()
 
 

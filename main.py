@@ -22,7 +22,6 @@ def get_args():
     parser.add_argument('-e', '--env', help='environment ID', default='BreakoutNoFrameskip-v4')
     parser.add_argument('-s', '--steps', help='training steps', type=int, default=int(80e6))
     parser.add_argument('--nenv', help='No. of environments', type=int, default=16)
-    parser.add_argument('--new', help='new session', action='store_true')
     return parser.parse_args()
 
 
